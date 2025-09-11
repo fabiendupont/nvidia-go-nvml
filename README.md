@@ -4,6 +4,7 @@
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
+- [Mock System](#mock-system)
 - [How the bindings are generated](#how-the-bindings-are-generated)
 - [Code Structure](#code-structure)
   - [Code defining the NVML API](#code-defining-the-nvml-api)
@@ -105,6 +106,73 @@ GPU-a27fb382-bad2-c02a-95ba-f6a1da38e76c
 GPU-f5bb8d07-ee19-1787-4d9a-a84c4ac6b086
 GPU-1ba0ca0e-6d1d-d9db-07d8-c1c5a8c32814
 ```
+
+## Mock System
+
+For testing and development purposes, this package provides a comprehensive mock system that simulates NVML behavior without requiring actual GPU hardware.
+
+### Features
+
+- **Realistic GPU Simulation**: Mock implementations for DGX A100 systems with accurate specifications
+- **MIG Support**: Full Multi-Instance GPU (MIG) operation simulation including GPU instances and compute instances
+- **Shared Architecture**: Extensible design that eliminates code duplication across GPU types
+- **Backward Compatibility**: Drop-in replacement for real NVML with identical APIs
+
+### Quick Start with Mocks
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/NVIDIA/go-nvml/pkg/nvml/mock/dgxa100"
+)
+
+func main() {
+    // Create a mock DGX A100 server (8 GPUs)
+    server := dgxa100.New()
+    
+    // Use standard NVML API
+    count, _ := server.DeviceGetCount()
+    fmt.Printf("Mock GPU count: %d\n", count) // Output: 8
+    
+    device, _ := server.DeviceGetHandleByIndex(0)
+    name, _ := device.GetName()
+    fmt.Printf("Device name: %s\n", name) // Output: Mock NVIDIA A100-SXM4-40GB
+}
+```
+
+### MIG Operations
+
+```go
+// Enable MIG mode
+currentRet, pendingRet := device.SetMigMode(1)
+
+// Create GPU instance (1g.5gb profile)
+profileInfo, _ := device.GetGpuInstanceProfileInfo(nvml.GPU_INSTANCE_PROFILE_1_SLICE)
+gi, _ := device.CreateGpuInstance(&profileInfo)
+
+// Create compute instance within GPU instance
+ciProfileInfo, _ := gi.GetComputeInstanceProfileInfo(
+    nvml.COMPUTE_INSTANCE_PROFILE_1_SLICE,
+    nvml.COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED,
+)
+ci, _ := gi.CreateComputeInstance(&ciProfileInfo)
+```
+
+### Testing
+
+The mock system includes comprehensive tests covering all functionality:
+
+```bash
+# Test shared mock architecture (comprehensive tests)
+go test ./pkg/nvml/mock/shared/specs/server -v
+
+# Test A100 backward compatibility (lightweight tests)
+go test ./pkg/nvml/mock/dgxa100 -v
+```
+
+For detailed documentation, see [`pkg/nvml/mock/README.md`](pkg/nvml/mock/README.md).
 
 ## How the bindings are generated
 

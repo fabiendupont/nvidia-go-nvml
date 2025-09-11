@@ -1,0 +1,282 @@
+# NVML Mock Architecture
+
+This package provides mock implementations of the NVIDIA Management Library (NVML) for testing and development purposes. The mock system simulates GPU behavior including device management, MIG (Multi-Instance GPU) operations, and system-level functions.
+
+## Architecture Overview
+
+The mock system is built on a shared architecture pattern that eliminates code duplication while providing specialized implementations for different GPU generations:
+
+```
+pkg/nvml/mock/
+├── shared/                           # Shared architecture components
+│   ├── base.go                      # Core types and constructors
+│   ├── const.go                     # GPU-specific constants
+│   ├── methods.go                   # Shared mock method implementations
+│   └── specs/                       # GPU specifications and server configs
+│       ├── gpu/                     # GPU-specific specifications
+│       │   └── a100.go             # A100 GPU spec and MIG profiles
+│       └── server/                  # Server configurations
+│           ├── dgxa100.go          # DGX A100 server factory
+│           └── server_test.go      # Shared architecture tests
+├── dgxa100/                         # DGX A100 specific implementation
+│   ├── dgxa100.go                  # A100 API wrapper with legacy compatibility
+│   └── dgxa100_test.go             # Backward compatibility tests
+└── README.md                       # This documentation
+```
+
+## Core Components
+
+### Shared Architecture (`pkg/nvml/mock/shared/`)
+
+#### Type Definitions (`base.go`)
+- **`GPUSpec`**: Defines GPU specifications including architecture, memory, CUDA capabilities
+- **`MIGProfileConfig`**: Contains complete MIG profile configurations
+- **`MockGPU`**: Main server implementation with configurable behavior
+- **`MockDevice`**: Individual GPU device with MIG instance management
+- **`MockGpuInstance`**: GPU instance for MIG partitioning
+- **`MockComputeInstance`**: Compute instance within GPU instances
+
+#### Constants (`const.go`)
+Centralized constants for all GPU-specific values:
+```go
+// GPU PCI Device IDs
+const (
+    A100_PCI_DEVICE_ID = 0x20B0 // NVIDIA A100-SXM4-40GB
+)
+
+// GPU Memory Sizes
+const (
+    A100_TOTAL_MEMORY_BYTES = 42949672960  // 40GB
+)
+
+// MIG Profile Memory Sizes
+const (
+    A100_MIG_1G_5GB_MEMORY_MB = 4864
+    A100_MIG_7G_40GB_MEMORY_MB = 40192
+    // ... and more
+)
+```
+
+#### GPU Specifications (`specs/gpu/a100.go`)
+Pre-configured GPU specifications:
+```go
+var A100Spec = GPUSpec{
+    Name:                "Mock NVIDIA A100-SXM4-40GB",
+    Architecture:        nvml.DEVICE_ARCH_AMPERE,
+    PciDeviceId:         A100_PCI_DEVICE_ID,
+    TotalMemoryMB:       A100_TOTAL_MEMORY_MB,
+    MIGProfiles:         A100MIGProfiles,
+}
+```
+
+#### Method Implementations (`methods.go`)
+Shared mock function implementations that work across all GPU types:
+- Server-level functions (Init, Shutdown, DeviceGetCount)
+- Device management (GetHandleByIndex, GetHandleByUUID)
+- Device properties (GetName, GetArchitecture, GetMemoryInfo)
+- MIG operations (SetMigMode, CreateGpuInstance, etc.)
+
+## Usage
+
+### Basic Usage
+```go
+import "github.com/NVIDIA/go-nvml/pkg/nvml/mock/dgxa100"
+
+// Create a DGX A100 mock server
+server := dgxa100.New()
+
+// Use standard NVML interface
+count, ret := server.DeviceGetCount()
+device, ret := server.DeviceGetHandleByIndex(0)
+name, ret := device.GetName()
+```
+
+### MIG Operations
+```go
+// Enable MIG mode
+currentRet, pendingRet := device.SetMigMode(1)
+
+// Get GPU instance profile
+profileInfo, ret := device.GetGpuInstanceProfileInfo(nvml.GPU_INSTANCE_PROFILE_1_SLICE)
+
+// Create GPU instance
+gi, ret := device.CreateGpuInstance(&profileInfo)
+
+// Create compute instance
+ciProfileInfo, ret := gi.GetComputeInstanceProfileInfo(
+    nvml.COMPUTE_INSTANCE_PROFILE_1_SLICE,
+    nvml.COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED,
+)
+ci, ret := gi.CreateComputeInstance(&ciProfileInfo)
+```
+
+### Custom GPU Mock
+```go
+import "github.com/NVIDIA/go-nvml/pkg/nvml/mock/shared"
+
+// Create custom GPU specification
+customSpec := shared.GPUSpec{
+    Name:                "Custom GPU",
+    Architecture:        nvml.DEVICE_ARCH_AMPERE,
+    DeviceCount:         4,
+    TotalMemoryMB:       shared.A100_TOTAL_MEMORY_MB,
+    MIGProfiles:         shared.A100MIGProfiles,
+}
+
+// Create mock with custom spec
+gpu := shared.NewMockGPU(customSpec)
+```
+
+## GPU Support
+
+### Currently Supported
+- **DGX A100**: Complete implementation with MIG support
+  - Architecture: Ampere (CUDA 8.0)
+  - Memory: 40GB HBM2
+  - MIG Profiles: 1g.5gb, 2g.10gb, 3g.20gb, 4g.20gb, 7g.40gb
+  - P2P in MIG: Not supported
+
+### Planned Support
+Future commits will add:
+- **DGX H100**: Hopper architecture with enhanced MIG
+- **DGX H200**: Hopper with increased memory
+- **DGX B200**: Blackwell architecture
+
+## MIG Profile Configuration
+
+### A100 MIG Profiles
+- **1g.5gb**: 1 slice, 4864 MB memory, 14 SMs
+- **2g.10gb**: 2 slices, 9856 MB memory, 28 SMs
+- **3g.20gb**: 3 slices, 19968 MB memory, 42 SMs
+- **4g.20gb**: 4 slices, 19968 MB memory, 56 SMs
+- **7g.40gb**: 7 slices, 40192 MB memory, 98 SMs (full GPU)
+
+Each profile includes:
+- GPU instance and compute instance configurations
+- Placement possibilities
+- Engine allocations (copy engines, decoders, etc.)
+- P2P support flags
+
+## Testing
+
+### Shared Architecture Tests (`specs/server/server_test.go`)
+- GPU specification validation
+- Device property verification
+- MIG operation workflows
+- Memory and capability testing
+- Interface compliance checks
+
+### Backward Compatibility Tests (`dgxa100_test.go`)
+- API compatibility verification
+- Original behavior preservation
+- MIG profile variable access
+- Error handling consistency
+
+### Running Tests
+```bash
+# Test shared architecture (comprehensive tests)
+go test ./pkg/nvml/mock/shared/specs/server -v
+
+# Test A100 backward compatibility (lightweight tests)
+go test ./pkg/nvml/mock/dgxa100 -v
+
+# Test all mock packages
+go test ./pkg/nvml/mock/... -v
+```
+
+## Design Principles
+
+### 1. Backward Compatibility
+All existing APIs remain unchanged. The `dgxa100.New()` function returns the same interface with identical behavior.
+
+### 2. Code Reuse
+Shared implementation eliminates 90%+ code duplication across GPU types while maintaining GPU-specific configurations.
+
+### 3. Realistic Behavior
+Mock responses match real NVML behavior including:
+- Proper error codes for invalid operations
+- Realistic memory values and GPU properties
+- Accurate MIG profile configurations
+
+### 4. Testability
+Comprehensive test coverage ensures:
+- Architecture correctness
+- Backward compatibility
+- MIG operation accuracy
+- Interface compliance
+
+### 5. Extensibility
+Adding new GPU types requires only:
+- GPU specification definition
+- MIG profile configuration
+- Thin wrapper package creation
+
+## Extension Guide
+
+To add a new GPU type:
+
+1. **Define Constants** in `shared/const.go`:
+```go
+const (
+    NEWGPU_PCI_DEVICE_ID = 0x12345678
+    NEWGPU_TOTAL_MEMORY_MB = 81920
+    // ... other constants
+)
+```
+
+2. **Create GPU Specification** in `shared/specs/gpu/newgpu.go`:
+```go
+var NewGPUSpec = GPUSpec{
+    Name:            "Mock NVIDIA NewGPU",
+    Architecture:    nvml.DEVICE_ARCH_NEWARCH,
+    PciDeviceId:     NEWGPU_PCI_DEVICE_ID,
+    TotalMemoryMB:   NEWGPU_TOTAL_MEMORY_MB,
+    MIGProfiles:     NewGPUMIGProfiles,
+}
+```
+
+3. **Add Factory Function** in `shared/specs/server/dgxnewgpu.go`:
+```go
+func NewDGXNewGPU() *MockGPU {
+    return NewMockGPU(NewGPUSpec)
+}
+```
+
+4. **Create Wrapper Package** (`dgxnewgpu/dgxnewgpu.go`):
+```go
+package dgxnewgpu
+
+import "github.com/NVIDIA/go-nvml/pkg/nvml/mock/shared/specs/server"
+
+type Server = shared.MockGPU
+
+func New() *Server {
+    return server.NewDGXNewGPU()
+}
+```
+
+## Contributing
+
+When modifying the mock system:
+
+1. **Use Constants**: Never use hardcoded values, define constants in `const.go`
+2. **Add Tests**: Include both shared architecture and backward compatibility tests  
+3. **Update Documentation**: Modify this README for any architectural changes
+4. **Verify Compatibility**: Ensure existing APIs remain unchanged
+5. **Follow Patterns**: Use the established patterns for consistency
+
+## Implementation Notes
+
+### Memory Management
+- All memory values use consistent units (bytes for calculations, MB for specifications)
+- Memory calculations use constants to ensure accuracy
+
+### MIG Instance Management
+- Thread-safe operations using sync.RWMutex
+- Proper parent-child relationships between GPU instances and compute instances
+- Realistic instance counters and ID assignment
+
+### Interface Compliance
+- Full `nvml.Interface` and `nvml.ExtendedInterface` implementation
+- Proper error code returns matching real NVML behavior
+- Type-safe operations with appropriate validations
